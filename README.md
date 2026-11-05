@@ -3,13 +3,14 @@
 Unattended installation of Windows Server on Proxmox VE: one small answer-file
 ISO per VM, built from environment variables.
 
-The repository contains three files:
+The repository contains these files:
 
 | File | Purpose |
 |---|---|
 | `autounattend.xml` | answer file, placeholders are substituted at build time |
 | `set-network.ps1` | applies the static IPv4 configuration inside the guest |
 | `make-install-iso.sh` | validates the values, builds the ISO, prints the `qm create` command |
+| `PROXMOX.md` | what the host needs and the one-time preparation (ISOs, image index) |
 
 There is deliberately no profile file and no default for site-specific values.
 An ISO per VM means the hostname and the network configuration are in the
@@ -130,12 +131,11 @@ one; volume media gets its key from the activation tooling afterwards.
 
 The answer file assumes:
 
-- UEFI (OVMF) with Secure Boot pre-enrolled keys — not a problem, the
-  Windows bootloader is signed
+- UEFI (OVMF) — the answer file creates a GPT layout, which needs UEFI
 - GPT: ESP 100 MB, MSR 16 MB, Windows on the rest
 - VirtIO SCSI single for the disk, VirtIO for the network
-- No second network adapter: multi-homing is not supported by some products
-  (Citrix, for one) and nothing here needs it
+- one network adapter: `set-network.ps1` configures the first adapter that
+  reports `Up`, so it may pick the wrong one if there are two
 
 ## Pitfalls
 
