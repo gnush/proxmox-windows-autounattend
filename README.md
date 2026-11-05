@@ -164,7 +164,9 @@ disables DHCP first, removes any existing address, then uses
 FirstLogonCommands do not run again afterwards — the later commands never
 execute. The first command therefore starts the installer asynchronously,
 the second stages a RunOnce entry (which survives the reboot), and the third
-forces the reboot.
+waits until the installer has exited and `netkvm.inf` is in the driver store
+(10 minutes at most), then forces the reboot. A fixed delay there can cut the
+installer off; the guest then has no NIC driver and the adapter never appears.
 
 ### Wrong or missing network driver in the guest
 

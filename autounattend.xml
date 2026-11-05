@@ -239,8 +239,8 @@
 
           So: Order 1 starts the installer ASYNCHRONOUSLY (no /wait).
           Order 2 drops set-network.ps1 and registers it as RunOnce, which
-          survives the reboot. Order 3 forces the reboot so the NetKVM
-          driver binds. On the second logon (LogonCount 2) the RunOnce
+          survives the reboot. Order 3 waits for the installer, then forces
+          the reboot so the NetKVM driver binds. On the second logon (LogonCount 2) the RunOnce
           entry fires and applies the network configuration.
         -->
         <SynchronousCommand wcm:action="add">
@@ -258,11 +258,14 @@
           <CommandLine>cmd /c for %i in (D E F G H) do if exist %i:\set-network.ps1 (mkdir C:\setup 2&gt;nul &amp; copy /Y %i:\set-network.ps1 C:\setup\set-network.ps1 &amp; reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" /v SetNetwork /t REG_SZ /d "powershell -NoProfile -ExecutionPolicy Bypass -File C:\setup\set-network.ps1" /f)</CommandLine>
         </SynchronousCommand>
 
-        <!-- Reboot so the NetKVM driver binds. -->
+        <!-- Reboot so the NetKVM driver binds, but only once the installer is
+             done: a fixed delay can cut it off and leave the VM without a NIC
+             driver. Waits for the installer process to exit and netkvm.inf to
+             be in the driver store; reboots after 10 minutes regardless. -->
         <SynchronousCommand wcm:action="add">
           <Order>3</Order>
-          <Description>Reboot for the VirtIO network driver</Description>
-          <CommandLine>shutdown /r /t 30 /c "Reboot: VirtIO network driver"</CommandLine>
+          <Description>Wait for the guest tools, reboot for the VirtIO network driver</Description>
+          <CommandLine>cmd /c powershell -NoProfile -Command "$t=(Get-Date).AddMinutes(10); while ((Get-Date) -lt $t) { if (-not (Get-Process virtio-win-guest-tools -ErrorAction SilentlyContinue) -and (pnputil /enum-drivers | Select-String -Quiet 'netkvm\.inf')) { break }; Start-Sleep -Seconds 3 }; shutdown /r /t 10 /c 'Reboot: VirtIO network driver'"</CommandLine>
         </SynchronousCommand>
       </FirstLogonCommands>
 
