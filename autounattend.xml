@@ -51,8 +51,12 @@
 
     <!--
       Only the storage driver has to be loaded in WinPE, otherwise the
-      target disk is invisible. The drive letter of the virtio-win ISO in
-      WinPE is not predictable, so D: through H: are all offered.
+      target disk is invisible.
+
+      The drive letter of the virtio-win ISO in WinPE is not predictable.
+      Paths without a drive letter cannot be listed here either, so each
+      candidate letter gets an entry. Their <Path> values must match the
+      ISO's layout exactly; a wrong letter only costs a lookup attempt.
 
       DRIVER_VERSION is the version folder inside the virtio-win ISO:
       2k16, 2k19, 2k22 or 2k25. See README for which ISO carries which.
