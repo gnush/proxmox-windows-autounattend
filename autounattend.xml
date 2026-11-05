@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Unattended installation of Windows Server (Desktop Experience) on
+  Proxmox VE: UEFI (OVMF), GPT, VirtIO drivers from the virtio-win ISO.
+
+  Nothing here is filled in by hand. make-install-iso.sh substitutes the
+  placeholders below from environment variables and writes the result onto
+  a small ISO that Proxmox attaches as an extra CD-ROM.
+
+  Sequence:
+    1. Setup runs unattended (partitioning, edition, drivers).
+    2. First logon: install VirtIO guest tools, copy set-network.ps1 to
+       C:\setup and register it as RunOnce, then reboot.
+    3. Second logon: the RunOnce entry applies the network configuration.
+
+  The reboot between 2 and 3 is deliberate: the VirtIO network driver
+  (NetKVM) from the guest tools only binds after a reboot. Before that
+  there is no usable adapter to configure.
+
+  Placeholders replaced by make-install-iso.sh:
+    @@HOSTNAME@@ @@ADMIN_PASSWORD@@ @@IMAGE_INDEX@@
+    @@DRIVER_VERSION@@ @@TIMEZONE@@
+
+  The network values are not here: they live in set-network.ps1, which is
+  rendered from the same run.
+
+  Deliberately absent:
+    - Product key / activation   -> supply separately, see README
+    - Domain join                -> workgroup
+    - Windows updates            -> run manually after installation
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+  <settings pass="windowsPE">
+
+    <component name="Microsoft-Windows-International-Core-WinPE"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <SetupUILanguage>
+        <UILanguage>en-US</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>0409:00000409</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <!--
+      Only the storage driver has to be loaded in WinPE, otherwise the
+      target disk is invisible. The drive letter of the virtio-win ISO in
+      WinPE is not predictable, so D: through H: are all offered.
+
+      DRIVER_VERSION is the version folder inside the virtio-win ISO:
+      2k16, 2k19, 2k22 or 2k25. See README for which ISO carries which.
+    -->
+    <component name="Microsoft-Windows-PnpCustomizationsWinPE"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <DriverPaths>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="1">
+          <Path>D:\vioscsi\@@DRIVER_VERSION@@\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="2">
+          <Path>E:\vioscsi\@@DRIVER_VERSION@@\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="3">
+          <Path>F:\vioscsi\@@DRIVER_VERSION@@\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="4">
+          <Path>G:\vioscsi\@@DRIVER_VERSION@@\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="5">
+          <Path>H:\vioscsi\@@DRIVER_VERSION@@\amd64</Path>
+        </PathAndCredentials>
+      </DriverPaths>
+    </component>
+
+    <component name="Microsoft-Windows-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+      <!-- GPT layout matching UEFI/OVMF:
+           ESP (100 MB, FAT32) + MSR (16 MB) + Windows (rest, NTFS). -->
+      <DiskConfiguration>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>EFI</Type>
+              <Size>100</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
+              <Type>MSR</Type>
+              <Size>16</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>3</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <!--
+              No <ModifyPartition> for the MSR partition (PartitionID 2) on
+              purpose: MSR has no file system. A <Label> or <Format> on it
+              makes Setup abort while applying <DiskConfiguration> with
+                "Windows could not assign a volume label to a partition"
+                (0x80004005).
+              The <Order> values of the remaining entries must be gap-free.
+            -->
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Format>FAT32</Format>
+              <Label>System</Label>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>3</PartitionID>
+              <Format>NTFS</Format>
+              <Label>Windows</Label>
+              <Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+        <WillShowUI>OnError</WillShowUI>
+      </DiskConfiguration>
+
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <!--
+              Selected by index, not by /IMAGE/NAME. A name that does not
+              match exactly makes Setup fall back to index 1 without an
+              error - often the Core edition - and fail later with a
+              misleading product key message. Verify the numbering on the
+              medium with:
+                dism /Get-WimInfo /WimFile:X:\sources\install.wim
+            -->
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/INDEX</Key>
+              <Value>@@IMAGE_INDEX@@</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+          <InstallToAvailablePartition>false</InstallToAvailablePartition>
+        </OSImage>
+      </ImageInstall>
+
+      <!-- No <ProductKey>: evaluation media needs none. Volume media gets
+           its key from the activation tooling. See README. -->
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <FullName>Administrator</FullName>
+      </UserData>
+    </component>
+  </settings>
+
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <ComputerName>@@HOSTNAME@@</ComputerName>
+      <TimeZone>@@TIMEZONE@@</TimeZone>
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+
+      <UserAccounts>
+        <AdministratorPassword>
+          <Value>@@ADMIN_PASSWORD@@</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+      </UserAccounts>
+
+      <!-- Two automatic logons: the first for the guest tools, the second
+           (after the reboot) for the network configuration. -->
+      <AutoLogon>
+        <Password>
+          <Value>@@ADMIN_PASSWORD@@</Value>
+          <PlainText>true</PlainText>
+        </Password>
+        <Enabled>true</Enabled>
+        <LogonCount>2</LogonCount>
+        <Username>Administrator</Username>
+      </AutoLogon>
+
+      <FirstLogonCommands>
+        <!--
+          Order matters here, hence the detail:
+
+          The guest tools installer reboots the machine itself. Calling it
+          with "start /wait" would block Order 1 until that reboot, and
+          FirstLogonCommands do not run again after a reboot - Order 2 and
+          3 would never execute, leaving no C:\setup.
+
+          So: Order 1 starts the installer ASYNCHRONOUSLY (no /wait).
+          Order 2 drops set-network.ps1 and registers it as RunOnce, which
+          survives the reboot. Order 3 forces the reboot so the NetKVM
+          driver binds. On the second logon (LogonCount 2) the RunOnce
+          entry fires and applies the network configuration.
+        -->
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Install VirtIO guest tools (asynchronous)</Description>
+          <CommandLine>cmd /c for %i in (D E F G H) do if exist %i:\virtio-win-guest-tools.exe start "" %i:\virtio-win-guest-tools.exe /S</CommandLine>
+        </SynchronousCommand>
+
+        <!-- Copy set-network.ps1 to C:\setup and register it as RunOnce.
+             The drive letter is only known at this point, which is why the
+             copy happens here and not in the XML. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Stage network script and schedule it for the next logon</Description>
+          <CommandLine>cmd /c for %i in (D E F G H) do if exist %i:\set-network.ps1 (mkdir C:\setup 2&gt;nul &amp; copy /Y %i:\set-network.ps1 C:\setup\set-network.ps1 &amp; reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" /v SetNetwork /t REG_SZ /d "powershell -NoProfile -ExecutionPolicy Bypass -File C:\setup\set-network.ps1" /f)</CommandLine>
+        </SynchronousCommand>
+
+        <!-- Reboot so the NetKVM driver binds. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>Reboot for the VirtIO network driver</Description>
+          <CommandLine>shutdown /r /t 30 /c "Reboot: VirtIO network driver"</CommandLine>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+
+    </component>
+  </settings>
+</unattend>
