@@ -30,7 +30,16 @@ $dns2   = '@@DNS2@@'
 
 # Take the adapter that has a cable connection. After the reboot and with
 # the guest tools installed, that is the VirtIO NIC (NetKVM).
-$adapter = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1
+# RunOnce fires at logon, before the freshly bound NIC is registered as an
+# adapter, so poll instead of checking once.
+$deadline = (Get-Date).AddSeconds(120)
+do {
+    $adapter = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1
+    if ($adapter) { break }
+    Write-Log 'no adapter up yet, waiting'
+    Start-Sleep -Seconds 3
+} while ((Get-Date) -lt $deadline)
+
 if (-not $adapter) {
     $adapter = Get-NetAdapter | Select-Object -First 1
 }

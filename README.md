@@ -172,6 +172,14 @@ The VirtIO network driver from the guest tools binds only after a reboot.
 Applying the IP config in the same logon as the driver installation fails
 because no adapter exists yet; hence the two-login sequence.
 
+### "no network adapter found" on the second logon
+
+RunOnce fires at logon, a few seconds before the freshly bound NIC shows up
+in `Get-NetAdapter`. The driver is installed and fine; a single check just
+comes too early. `set-network.ps1` polls for an adapter in state `Up` for up
+to 120 s before it falls back to the first adapter. Re-running the script
+by hand afterwards is safe.
+
 ## Security
 
 The answer ISO contains the local Administrator password in clear text.
