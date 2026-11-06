@@ -27,6 +27,8 @@
 #
 # Optional:
 #   TIMEZONE         Windows time zone id (UTC)
+#   ENABLE_PING      1 enables inbound ICMPv4 from the VM's own subnet;
+#                    any other value leaves it off
 #
 # Required only when VMID is set (otherwise the qm command is omitted):
 #   VMID             numeric VM id
@@ -44,6 +46,7 @@
 set -euo pipefail
 
 TIMEZONE="${TIMEZONE:-UTC}"
+ENABLE_PING="${ENABLE_PING:-0}"
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -89,6 +92,7 @@ SRC_DIR="$SRC_DIR" WORKDIR="$workdir" \
 ADMIN_PASSWORD="$ADMIN_PASSWORD" VM_HOSTNAME="$VM_HOSTNAME" \
 IP="$IP" PREFIX="$PREFIX" GW="$GW" DNS1="$DNS1" DNS2="$DNS2" \
 DRIVER_VERSION="$DRIVER_VERSION" IMAGE_INDEX="$IMAGE_INDEX" TIMEZONE="$TIMEZONE" \
+ENABLE_PING="$ENABLE_PING" \
 python3 <<'PY'
 import ipaddress, os, sys
 import xml.sax.saxutils as sx
@@ -132,8 +136,30 @@ net = {
     '@@DNS2@@':   env['DNS2'],
 }
 
+# The rule targets the VM's own subnet, never the whole internet side.
+subnet = str(ipaddress.IPv4Network(f"{env['IP']}/{env['PREFIX']}", strict=False))
+
+ping_values = {'@@SUBNET@@': subnet}
+
+# cmd /c for replaces %i in a FirstLogonCommands line.
+def runonce(key, fname):
+    return ('        ' + '<SynchronousCommand wcm:action="add">'
+            '<Order>2</Order>'
+            f'<Description>Stage {fname}</Description>'
+            f'<CommandLine>cmd /c for %i in (D E F G H) do if exist %i:\\{fname} '
+            f'(copy /Y %i:\\{fname} C:\\setup\\{fname} '
+            f'&amp; reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce" '
+            f'/v {key} /t REG_SZ /d "powershell -NoProfile -ExecutionPolicy Bypass '
+            f'-File C:\\setup\\{fname}" /f)</CommandLine>'
+            '</SynchronousCommand>')
+
+ping_command = ''
+if env['ENABLE_PING'] == '1':
+    ping_command = runonce('EnablePing', 'enable-ping.ps1')
+
 xml_values = {
     **net,
+    '@@PING_COMMAND@@':   ping_command.rstrip(),
     '@@HOSTNAME@@':       xesc(env['VM_HOSTNAME']),
     '@@ADMIN_PASSWORD@@': xesc(env['ADMIN_PASSWORD']),
     '@@DRIVER_VERSION@@': env['DRIVER_VERSION'],
@@ -164,6 +190,9 @@ except Exception as e:
 # set-network.ps1: plain values, CRLF for Windows PowerShell
 render('set-network.ps1', net, crlf=True)
 
+if env['ENABLE_PING'] == '1':
+    render('enable-ping.ps1', ping_values, crlf=True)
+
 print('Substitution OK: XML well-formed, no placeholders left.')
 PY
 
@@ -174,7 +203,7 @@ echo "  hostname:  $VM_HOSTNAME"
 echo "  network:   $IP/$PREFIX gw $GW dns $DNS1,$DNS2"
 echo "  driver:    vioscsi/$DRIVER_VERSION/amd64"
 echo "  image:     index $IMAGE_INDEX"
-echo "  contents:  autounattend.xml, set-network.ps1"
+echo "  contents:  autounattend.xml, set-network.ps1$( [ "$ENABLE_PING" = 1 ] && echo ', enable-ping.ps1')"
 echo
 echo "The ISO contains the Administrator password in clear text. Detach it"
 echo "from the VM and remove it from the ISO store once installed."

@@ -258,6 +258,10 @@
           <CommandLine>cmd /c for %i in (D E F G H) do if exist %i:\set-network.ps1 (mkdir C:\setup 2&gt;nul &amp; copy /Y %i:\set-network.ps1 C:\setup\set-network.ps1 &amp; reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" /v SetNetwork /t REG_SZ /d "powershell -NoProfile -ExecutionPolicy Bypass -File C:\setup\set-network.ps1" /f)</CommandLine>
         </SynchronousCommand>
 
+        <!-- Only present when ping was enabled at build time. The copy
+             relies on C:\setup, created by the command above. -->
+@@PING_COMMAND@@
+
         <!-- Reboot so the NetKVM driver binds, but only once the installer is
              done: a fixed delay can cut it off and leave the VM without a NIC
              driver. Waits for the installer process to exit and netkvm.inf to
