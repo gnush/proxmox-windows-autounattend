@@ -29,6 +29,8 @@
 #   TIMEZONE         Windows time zone id (UTC)
 #   ENABLE_PING      1 enables inbound ICMPv4 from the VM's own subnet;
 #                    any other value leaves it off
+#   ENABLE_RDP       1 enables Remote Desktop (NLA) from the VM's own
+#                    subnet; any other value leaves it off
 #
 # Required only when VMID is set (otherwise the qm command is omitted):
 #   VMID             numeric VM id
@@ -47,6 +49,7 @@ set -euo pipefail
 
 TIMEZONE="${TIMEZONE:-UTC}"
 ENABLE_PING="${ENABLE_PING:-0}"
+ENABLE_RDP="${ENABLE_RDP:-0}"
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -92,7 +95,7 @@ SRC_DIR="$SRC_DIR" WORKDIR="$workdir" \
 ADMIN_PASSWORD="$ADMIN_PASSWORD" VM_HOSTNAME="$VM_HOSTNAME" \
 IP="$IP" PREFIX="$PREFIX" GW="$GW" DNS1="$DNS1" DNS2="$DNS2" \
 DRIVER_VERSION="$DRIVER_VERSION" IMAGE_INDEX="$IMAGE_INDEX" TIMEZONE="$TIMEZONE" \
-ENABLE_PING="$ENABLE_PING" \
+ENABLE_PING="$ENABLE_PING" ENABLE_RDP="$ENABLE_RDP" \
 python3 <<'PY'
 import ipaddress, os, sys
 import xml.sax.saxutils as sx
@@ -157,9 +160,14 @@ ping_command = ''
 if env['ENABLE_PING'] == '1':
     ping_command = runonce('EnablePing', 'enable-ping.ps1')
 
+rdp_command = ''
+if env['ENABLE_RDP'] == '1':
+    rdp_command = runonce('EnableRdp', 'enable-rdp.ps1')
+
 xml_values = {
     **net,
     '@@PING_COMMAND@@':   ping_command.rstrip(),
+    '@@RDP_COMMAND@@':    rdp_command.rstrip(),
     '@@HOSTNAME@@':       xesc(env['VM_HOSTNAME']),
     '@@ADMIN_PASSWORD@@': xesc(env['ADMIN_PASSWORD']),
     '@@DRIVER_VERSION@@': env['DRIVER_VERSION'],
@@ -193,6 +201,9 @@ render('set-network.ps1', net, crlf=True)
 if env['ENABLE_PING'] == '1':
     render('enable-ping.ps1', ping_values, crlf=True)
 
+if env['ENABLE_RDP'] == '1':
+    render('enable-rdp.ps1', ping_values, crlf=True)
+
 print('Substitution OK: XML well-formed, no placeholders left.')
 PY
 
@@ -203,7 +214,7 @@ echo "  hostname:  $VM_HOSTNAME"
 echo "  network:   $IP/$PREFIX gw $GW dns $DNS1,$DNS2"
 echo "  driver:    vioscsi/$DRIVER_VERSION/amd64"
 echo "  image:     index $IMAGE_INDEX"
-echo "  contents:  autounattend.xml, set-network.ps1$( [ "$ENABLE_PING" = 1 ] && echo ', enable-ping.ps1')"
+echo "  contents:  autounattend.xml, set-network.ps1$( [ "$ENABLE_PING" = 1 ] && echo ', enable-ping.ps1')$( [ "$ENABLE_RDP" = 1 ] && echo ', enable-rdp.ps1')"
 echo
 echo "The ISO contains the Administrator password in clear text. Detach it"
 echo "from the VM and remove it from the ISO store once installed."
