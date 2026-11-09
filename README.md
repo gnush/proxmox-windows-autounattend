@@ -9,6 +9,8 @@ The repository contains these files:
 |---|---|
 | `autounattend.xml` | answer file, placeholders are substituted at build time |
 | `set-network.ps1` | applies the static IPv4 configuration inside the guest |
+| `enable-ping.ps1` | inbound ICMPv4 from the VM's subnet, only with `ENABLE_PING=1` |
+| `enable-rdp.ps1` | Remote Desktop (NLA) from the VM's subnet, only with `ENABLE_RDP=1` |
 | `make-install-iso.sh` | validates the values, builds the ISO, prints the `qm create` command |
 | `PROXMOX.md` | what the host needs and the one-time preparation (ISOs, image index) |
 
@@ -60,7 +62,9 @@ The rest runs on its own:
 2. First logon installs the VirtIO guest tools, stages `set-network.ps1` and
    reboots — the network driver only binds after that reboot.
 3. Second logon applies the static IP configuration.
-   Log: `C:\setup-network.log`.
+   Log: `C:\setup-network.log`. With `ENABLE_PING` or `ENABLE_RDP` set, it
+   also opens that service to the subnet. Logs: `C:\setup-ping.log`,
+   `C:\setup-rdp.log`.
 
 Afterwards: run Windows updates, detach `ide0` (answer ISO) and `ide3`
 (virtio-win), then remove the answer ISO from the ISO store.
@@ -73,6 +77,22 @@ therefore never defaulted: addresses, hostname, password, storage, bridge.
 `DRIVER_VERSION` and `IMAGE_INDEX` are the two values that depend on the
 Windows version and on the media. Everything else in the answer file is
 version-independent.
+
+### Reachability
+
+A fresh Server install blocks inbound ICMP and ships with RDP off: echo is
+answered outbound only, and `TermService` is stopped. Two optional flags open
+them, each to the subnet of `IP`/`PREFIX` and to nothing else:
+
+| Flag | Effect | Guest log |
+|---|---|---|
+| `ENABLE_PING=1` | inbound ICMPv4 echo request | `C:\setup-ping.log` |
+| `ENABLE_RDP=1` | `fDenyTSConnections=0`, NLA kept, `TermService` automatic, TCP 3389 | `C:\setup-rdp.log` |
+
+Both are off unless set to `1`. The rules do not replace the stock Windows
+rules for these services; if you enable the stock group later (Server
+Manager, `Enable-NetFirewallRule`), it accepts any source and the scoping
+here is lost.
 
 ### Driver folder
 
